@@ -44,8 +44,60 @@ plt.axvline(mean_freq, color=PALETTE["avg_line"], linestyle="--", label=f"Mean: 
 plt.title("Distribusi Frekuensi Login", fontsize=14, fontweight="bold")
 plt.xlabel("Frekuensi Login")
 plt.ylabel("Jumlah Siswa")
-plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(1))
-plt.legend()
-plt.gca().spines[["top", "right"]].set_visible(False)
 
-plt.show()
+# Kode untuk membuat memprediksi akurasi churn dan k means
+
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report, accuracy_score
+from imblearn.over_sampling import SMOTE
+
+# 1. pemmbersihan data mentah
+(
+df = pd.read_csv("data_siswa_pintar_bersama_Training (3).csv")
+df = df.dropna()
+df = df[(df['waktu_modul'] >= 0) & (df['durasi_klik'] >= 0)]
+Q1 = df['durasi_klik'].quantile(0.25)
+Q3 = df['durasi_klik'].quantile(0.75)
+IQR = Q3 - Q1
+upper_bound = Q3 + 1.5 * IQR
+df = df[df['durasi_klik'] <= upper_bound].copy()
+
+# 2. K-MEANS CLUSTERING (Bagi 3 tipe siswa)
+fitur = ['durasi_klik', 'waktu_modul', 'skor_kuis', 'login_frekuensi']
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(df[fitur])
+
+kmeans = KMeans(n_clusters=3, random_state=42)
+df['klaster'] = kmeans.fit_predict(X_scaled)
+
+# 3. NENTUIN TARGET CHURN (Klaster 1 itu siswa pasif/nilai anjlok)
+df['churn'] = (df['klaster'] == 1).astype(int)
+
+# 4. ANN & SMOTE PIPELINE
+X = df[['durasi_klik', 'waktu_modul', 'ulang_video', 'skor_kuis', 'login_frekuensi']]
+y = df['churn']
+
+# Split data 80% belajar, 20% ujian
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Pake SMOTE biar adil datanya
+smote = SMOTE(random_state=42)
+X_train_sm, y_train_sm = smote.fit_resample(X_train, y_train)
+
+# Scale data ANN
+X_train_sm_scaled = scaler.fit_transform(X_train_sm)
+X_test_scaled = scaler.transform(X_test)
+
+# Otak ANN (Hidden layer: 64, 32, 16 neuron)
+ann = MLPClassifier(hidden_layer_sizes=(64, 32, 16), max_iter=500, random_state=42)
+ann.fit(X_train_sm_scaled, y_train_sm)
+
+# Test akurasi
+prediksi = ann.predict(X_test_scaled)
+print("=== HASIL PREDIKSI ANN ===")
+print(f"Akurasi: {accuracy_score(y_test, prediksi)*100:.2f}%\n")
+print(classification_report(y_test, prediksi))
